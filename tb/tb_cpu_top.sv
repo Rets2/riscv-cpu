@@ -1,8 +1,8 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// Smoke test for the three instructions currently initialized in inst_mem.v.
-// This test observes internal state; it does not modify the DUT or its memories.
+// Smoke test for a three-instruction program supplied using +IMEM=<file>.
+// The TB loads IMEM during reset, then observes state without further writes.
 module tb_cpu_top;
     reg clk;
     reg rst_n;
@@ -12,6 +12,9 @@ module tb_cpu_top;
     integer pass_count;
     integer fail_count;
     integer cycle;
+
+    localparam integer IMEM_DEPTH = 16384;
+    string imem_file;
 
     cpu_top dut (
         .clk(clk),
@@ -25,6 +28,61 @@ module tb_cpu_top;
         clk = 1'b0;
         forever #5 clk = ~clk;
     end
+
+    // File format: whitespace-separated 8-digit hexadecimal words only.
+    // Reject comments, @addresses, X/Z, prefixes and words wider than 32 bits.
+    // Count validated words first so $readmemh reads exactly the supplied range.
+    task automatic load_imem;
+        integer image_fd;
+        integer scan_result;
+        integer word_count;
+        integer char_index;
+        string word_text;
+        begin
+            if (!$value$plusargs("IMEM=%s", imem_file))
+                $fatal(1, "Missing +IMEM=<file>; provide a smoke program image");
+
+            image_fd = $fopen(imem_file, "r");
+            if (image_fd == 0)
+                $fatal(1, "Cannot open IMEM image: %s", imem_file);
+
+            word_count = 0;
+            while (!$feof(image_fd)) begin
+                scan_result = $fscanf(image_fd, "%s", word_text);
+                if (scan_result == 1) begin
+                    if (word_count >= IMEM_DEPTH)
+                        $fatal(1, "IMEM image exceeds %0d words: %s",
+                               IMEM_DEPTH, imem_file);
+
+                    if (word_text.len() != 8)
+                        $fatal(1, "IMEM word %0d must have 8 hex digits: %s",
+                               word_count, word_text);
+
+                    for (char_index = 0; char_index < 8;
+                         char_index = char_index + 1) begin
+                        if (!((word_text[char_index] >= "0" &&
+                               word_text[char_index] <= "9") ||
+                              (word_text[char_index] >= "a" &&
+                               word_text[char_index] <= "f") ||
+                              (word_text[char_index] >= "A" &&
+                               word_text[char_index] <= "F")))
+                            $fatal(1, "Invalid hex digit in IMEM word %0d: %s",
+                                   word_count, word_text);
+                    end
+                    word_count = word_count + 1;
+                end else if (!$feof(image_fd)) begin
+                    $fatal(1, "Cannot parse IMEM image: %s", imem_file);
+                end
+            end
+            $fclose(image_fd);
+
+            if (word_count == 0)
+                $fatal(1, "IMEM image is empty: %s", imem_file);
+
+            $readmemh(imem_file, dut.u_inst_mem.mem, 0, word_count - 1);
+            $display("[IMEM] Loaded %0d words from %s", word_count, imem_file);
+        end
+    endtask
 
     // Case inequality also treats any X/Z in the observed value as a failure.
     task automatic check_word(
@@ -90,12 +148,15 @@ module tb_cpu_top;
         // Generate an explicit reset edge, hold through two clock cycles,
         // then check reset state and release reset away from a rising edge.
         #1 rst_n = 1'b0;
+        // IMEM's time-zero NOP initialization has finished. Loading consumes
+        // no simulated time and completes before reset is released at 21 ns.
+        load_imem();
         repeat (2) @(negedge clk);
         #1;
         check_state(0, 32'h0000_0000, 32'd0, 32'd0, 32'd0);
 
-        // Verify the test's program assumptions rather than silently testing
-        // a different program after inst_mem.v has been changed.
+        // The loader accepts other images, but this TB's expected states are
+        // specific to the smoke program. Keep checking that program contract.
         check_word("program[0]: addi x1,x0,5",
                    dut.u_inst_mem.mem[0], 32'h0050_0093);
         check_word("program[1]: addi x2,x0,10",

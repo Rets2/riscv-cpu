@@ -1,0 +1,98 @@
+修改记录：IMEM 从外部机器码镜像加载
+日期：2026-10-22
+修改前基线：d08c041（Fix CPU integration and add passing smoke test）
+范围：将原来已通过仿真的三条指令移出 RTL，保持 CPU 数据通路、接口、地址范围和原有自检查目标。
+
+一、逐项修改
+
+1. rtl/inst_mem.v
+   - 删除 mem[0]、mem[1]、mem[2] 的三条测试程序赋值。
+   - 保留整个 16384 × 32 bit 存储器的 NOP 初始化。
+   - 更新初始化注释，说明仿真程序由 TB 在复位期间加载。
+   - 未修改组合取指、四字节对齐检查、地址范围或模块接口。
+   - 行为变化：IMEM 单独仿真且没有加载程序时，所有位置均为 NOP。
+
+2. sw/images/smoke.hex（新增）
+   - 保存原来的三个 32 位指令字，顺序和编码不变：
+       00500093：addi x1,x0,5
+       00a00113：addi x2,x0,10
+       002081b3：add x3,x1,x2
+   - 每行一个 8 位十六进制字，不写 0x 或 Verilog 位宽前缀。
+   - 该文件是手工维护的基准输入，目前还不是汇编器生成产物，应加入 Git。
+
+3. tb/tb_cpu_top.sv
+   - 更新文件头，说明 TB 会在复位期间加载 IMEM。
+   - 新增 imem_file 变量和 IMEM_DEPTH=16384 容量检查常量。
+   - 新增 load_imem 任务，通过 +IMEM=<file> 选择文件。
+   - 使用 $fopen 检查文件能否打开；缺少参数、文件不存在或文件为空时 $fatal。
+   - 先扫描并验证镜像，再用 $readmemh 加载。
+   - 镜像格式限定为空白分隔的 8 位十六进制字；不接受注释、@地址、X/Z 或前缀。
+   - 检查字数不超过 16384；格式或容量错误时 $fatal。
+   - $readmemh 的下标范围为 0 到 word_count-1，避免将短文件误当作完整 64 KiB 镜像。
+   - 在 1 ns 拉低复位后加载，此时 RTL 在 0 ns 的 NOP 初始化已经结束。
+   - 加载不消耗仿真时间，后续复位释放和采样时间不变。
+   - 加载后打印文件路径和字数，便于确认本次实际使用的程序。
+   - 保留原来的程序核对和状态检查，预期仍为 251 次检查、76 ns 结束。
+   - load_imem 可以读取其他合法镜像，但本 TB 的预期值仍只适用于 smoke 程序。
+
+4. docs/changes/2026-10-22-imem-file-loading.txt（本文件）
+   - 记录修改原因、文件变化、运行步骤、验收标准及验证状态。
+
+二、文件格式和路径约定
+
+IMEM 数组元素为 32 位字；镜像第一个字进入 mem[0]，对应 CPU 字节地址 0。
+下一字进入 mem[1]，对应 CPU 字节地址 4，以此类推。
+未加载位置保留 RTL 初始化的 NOP。
+镜像文件名的相对路径以运行 ./simv 时的工作目录为准，不以 TB 文件目录为准。
+当前不支持稀疏 @地址格式、Intel HEX、ELF 或原始二进制文件直接加载。
+未来 FPGA 初始化需要单独适配，不会将 TB 的 plusargs 和文件读取逻辑综合进硬件。
+
+三、手动同步（Windows pwsh7；IP 使用当前实际地址）
+
+Set-Location "C:\Users\32613\Desktop\digital_ic\eda_project\eda_code\cpu-core"
+scp -i "$env:USERPROFILE\.ssh\id_ed25519_riscv_vm" -r .\rtl .\tb .\sw IC@192.168.17.130:/home/IC/projects/cpu-core/
+
+说明：本次新增 sw/，因此同步时需要包含它。该 scp 命令覆盖同名文件但不会清理远端旧文件。
+
+四、手动编译和运行（CentOS Bash）
+
+cd ~/projects/cpu-core
+mkdir -p build/cpu_smoke
+cd build/cpu_smoke
+vcs -full64 -sverilog -timescale=1ns/1ps ../../rtl/*.v ../../tb/tb_cpu_top.sv -top tb_cpu_top -o simv -l compile.log
+vcs_rc=$?
+printf 'Compile exit code: %s\n' "$vcs_rc"
+tail -n 20 compile.log
+
+编译没有错误且完成链接后再运行：
+./simv +IMEM=../../sw/images/smoke.hex -l run.log
+sim_rc=$?
+printf 'Simulation exit code: %s\n' "$sim_rc"
+
++IMEM 是 TB 使用 $value$plusargs 读取的运行参数，不是 VCS 自动提供的程序加载功能。
+
+五、验收标准
+
+正向：
+  日志新增 [IMEM] Loaded 3 words from ../../sw/images/smoke.hex。
+  各阶段状态与旧版本一致，最终 PC=00000018、x1=5、x2=10、x3=15。
+  CPU SMOKE SUMMARY: CHECKS_PASS=251 CHECKS_FAIL=0。
+  ALL CPU SMOKE TESTS PASSED，正常仿真时间仍为 76 ns。
+
+失败路径（正向通过后使用同一个 simv 分别执行；预期失败，不应出现成功标志）：
+  ./simv -l missing_arg.log
+  预期 Missing +IMEM=<file>。
+
+  ./simv +IMEM=../../sw/images/does-not-exist.hex -l missing_file.log
+  预期 Cannot open IMEM image。
+
+  空文件、非 8 位十六进制字、非法字符和超过 16384 字的文件也应失败。
+  若文件格式正确但程序不同，加载可成功，随后 smoke 专用检查应报告不符合预期。
+
+六、验证状态
+
+修改前：用户已实际完成 VCS 冒烟仿真，251 项检查通过，76 ns 正常结束。
+修改后静态检查：镜像与旧版本三条机器码一致；检查任务、逐拍预期、汇总和超时逻辑保持不变。
+2026-10-22 用户反馈：“新的工程测试全部通过”。记录为用户手动验证通过；助手未代为执行 VCS。
+本次反馈未附逐项日志，正向计数及各失败路径的具体输出未在本记录中另外摘录。
+未自动 git add、commit 或 push。

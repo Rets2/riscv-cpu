@@ -16,6 +16,10 @@
 *.vpd
 *.fsdb
 
+# Python helper outputs
+__pycache__/
+*.pyc
+
 # Editor temporary files
 *.swp
 *.swo

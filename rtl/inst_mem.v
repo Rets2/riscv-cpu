@@ -9,13 +9,9 @@ module inst_mem(
     integer i;
 
     initial begin
-        //NOP
+        // Default contents: NOP. The simulation TB loads a program during reset.
         for (i = 0; i < 16384; i = i + 1)
             mem[i] = 32'h00000013;
-
-        mem[0] = 32'h00500093;  // addi x1, x0, 5
-        mem[1] = 32'h00A00113;  // addi x2, x0, 10
-        mem[2] = 32'h002081B3;  // add  x3, x1, x2
     end
     
     always@(*)begin

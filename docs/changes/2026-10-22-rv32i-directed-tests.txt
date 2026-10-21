@@ -1,0 +1,132 @@
+修改记录：一次补齐项目支持的37条指令机器码与整核定向测试
+日期：2026-10-22
+前置状态：用户报告外部IMEM加载版本测试全部通过，相关修改尚未提交。
+授权范围：生成完整机器码、测试样例、TB及修改记录；最终VCS编译仿真由用户手动执行。
+ISA依据：https://docs.riscv.org/reference/isa/v20260120/unpriv/rv32.html
+
+一、范围与文件
+
+保留 smoke.hex 和 tb_cpu_top.sv 的三指令冒烟测试，以便回归。
+新增 rv32i_all.hex 和 tb_cpu_rv32i.sv，不把旧测试的固定预期值用于新程序。
+CPU核心、Decoder、Data Memory、错误机制和存储器映射均未因本次扩展而修改。
+rtl/inst_mem.v 中已有的外部镜像改造属于上一份修改记录。
+
+1. sw/tests/rv32i_all.S
+   人工可读的完整测试程序，使用37种已实现指令，不使用伪指令。
+   含85处执行路径上的手写expect检查点，覆盖寄存器值及存储器字值。
+   指令总字数152，按正确路径动态执行145条。
+   分支之后放置会写x31的毒化指令，正确路径应跳过；参考执行最终要求x31=0。
+   末尾使用 jal x0,done 自循环；TB按预期轨迹长度结束，不依赖ECALL/EBREAK。
+   完整RV32I规范还含本项目未实现的指令，本测试的37种指令是项目定义的子集。
+
+2. scripts/generate_rv32i_vectors.py
+   仅依赖Python标准库，提供受限的两遍编码器与分开的机器码参考执行模型。
+   根据.S中的标签编码跳转偏移，并检查立即数范围及对齐要求。
+   参考模型从实际生成的32位机器码解码执行，不读取DUT输出或RTL控制编码。
+   手写expect注释用于额外核对参考模型结果，不从DUT结果反推预期值。
+   校验37种指令均实际执行、六种分支均有taken/not_taken、毒化指令未被执行。
+   该脚本只支持本测试用到的显式语法，不替代工程后续的GNU软件构建流程。
+   执行时生成镜像、轨迹、地址清单、覆盖报告及build/下的原始二进制。
+   不运行VCS，不编译或仿真RTL。
+   可选 --check-objdump <file>，独立核对GNU反汇编中的每条指令与全部操作数。
+
+3. sw/images/rv32i_all.hex
+   完整机器码镜像，152个32位字，格式与已有IMEM加载器一致。
+   SHA256: 56f98c952a68b748e92383871cd203458c9bb4484a8d70accb4c2f91e626dcbf
+
+4. sw/expected/rv32i_all.trace
+   机器可读的逐指令预期状态，7399个32位字。
+   头部4字：magic=52563332、格式版本=1、动态指令数=145、IMEM字数=152。
+   每行51字：执行前PC、机器码、执行后PC、x0..x31、DMEM前16个字。
+   正确路径最终PC=0000025c，预计正常仿真时间1466 ns。
+
+5. sw/tests/rv32i_all.lst
+   地址、机器码与汇编指令逐行对应，供人工定位TB失败PC。
+   该文件是编码清单，不冒充GNU objdump的反汇编输出。
+
+6. sw/tests/rv32i_all.coverage.txt
+   宿主机参考执行的指令命中、分支结果、手写检查点与镜像哈希报告。
+   文件首行明确标注这是参考执行结果，不是CPU/VCS通过证据。
+
+7. tb/tb_cpu_rv32i.sv
+   新的完整定向测试顶层，保留旧的tb_cpu_top供小规模回归。
+   参数：+IMEM=<hex> +EXPECT=<trace>，可选+TRACE。
+   严格检查输入文件格式、容量、轨迹头部、轨迹长度及配对镜像字数。
+   TB在复位期间把DMEM初始化为零，作为本测试的初始条件；不声称硬件复位会清RAM。
+   逐条检查取指PC与机器码，并在每个有效上升沿后1 ns检查：
+     PC、全部32个寄存器、halted、cpu_error，以及DMEM前16个字。
+   一条指令检查失败时，输出step、PC、机器码、指令种类及实际/预期值，并$fatal。
+   结束时检查剩余16368个DMEM字仍为零，以发现测试窗口外的误写。
+   对实际执行并通过检查的指令计数，要求37/37指令种类及六种分支的两种结果均覆盖。
+   超时上限6000 ns，最大预期步数512。
+   不强制写PC或寄存器；IMEM/DMEM只在复位保持期间由TB初始化。
+
+8. .gitignore
+   新增 __pycache__/ 和 *.pyc，排除Python辅助脚本的缓存文件。
+
+9. docs/changes/2026-10-22-rv32i-directed-tests.txt
+   本记录，包含生成方法、验证范围、当前证据和手动运行步骤。
+
+二、主要测试样例
+
+R型10种：ADD/SUB/AND/OR/XOR/SLL/SRL/SRA/SLT/SLTU。
+I型整数9种：ADDI/SLTI/SLTIU/XORI/ORI/ANDI/SLLI/SRLI/SRAI。
+访存8种：LB/LH/LW/LBU/LHU/SB/SH/SW。
+分支6种：BEQ/BNE/BLT/BGE/BLTU/BGEU，每种均执行跳转和不跳转。
+跳转2种：JAL/JALR，检查返回地址、前后向跳转、丢弃写回与rd=rs1。
+U型2种：LUI/AUIPC，包括高位为1及非零PC的情况。
+
+边界包括：
+  32位算术回绕；-2048/2047立即数；正数、负数、相等值的有符号/无符号比较。
+  寄存器移位量31/32/33取低5位；立即数移位0/31；算术右移符号填充。
+  四个字节通道、两个半字通道、小端顺序、负数符号扩展/零扩展、写掩码保留其他字节。
+  负偏移访存、store后load、load后立即使用、向x0写回、从有效RAM load到x0。
+  负偏移分支循环；未采用的条件分支候选目标不对齐时不得误报。
+  JALR奇数原始目标清bit0，JALR rd=rs1使用写回前的旧rs1，JALR负立即数。
+
+不覆盖：异常停机、非法指令、非法地址、实际未对齐访存/跳转、UART、FPGA和时序。
+37/37是指令种类覆盖，不是完整RISC-V合规认证或所有输入组合覆盖。
+
+三、宿主机可复现生成（Windows pwsh7）
+
+Set-Location "C:\Users\32613\Desktop\digital_ic\eda_project\eda_code\cpu-core"
+python .\scripts\generate_rv32i_vectors.py
+
+四、用户手动同步和VCS仿真
+
+Windows pwsh7；IP请以虚拟机当前实际地址为准：
+scp -i "$env:USERPROFILE\.ssh\id_ed25519_riscv_vm" -r .\rtl .\tb .\sw IC@192.168.17.130:/home/IC/projects/cpu-core/
+
+CentOS Bash：
+cd ~/projects/cpu-core
+mkdir -p build/cpu_rv32i
+cd build/cpu_rv32i
+vcs -full64 -sverilog -timescale=1ns/1ps ../../rtl/*.v ../../tb/tb_cpu_rv32i.sv -top tb_cpu_rv32i -o simv -l compile.log
+vcs_rc=$?
+printf 'Compile exit code: %s\n' "$vcs_rc"
+tail -n 20 compile.log
+
+确认无编译错误且完成链接后执行：
+./simv +IMEM=../../sw/images/rv32i_all.hex +EXPECT=../../sw/expected/rv32i_all.trace -l run.log
+sim_rc=$?
+printf 'Simulation exit code: %s\n' "$sim_rc"
+
+需要查看全部145步时，在运行命令中增加 +TRACE；这只是打印开关，不改变测试内容。
+可在原来的build/cpu_smoke目录使用旧tb_cpu_top和smoke.hex继续执行251次检查回归。
+
+五、预期结果和证据边界
+
+成功时每种指令会打印[COVER]，六种分支打印[BRANCH]的两种命中数。
+预期汇总：
+RV32I SUMMARY: INSTRUCTION_KINDS=37/37 STEPS=145 CHECKS_PASS=24092 CHECKS_FAIL=0
+ALL RV32I DIRECTED TESTS PASSED
+正常仿真结束时间1466 ns。
+
+已经执行：宿主机机器码生成、参考执行、85处手写检查点、覆盖条件和镜像/轨迹格式检查。
+独立编码核对：使用虚拟机已有GNU objdump 2.35，152个机器码的指令名称、寄存器、
+立即数和跳转目标全部与汇编源清单一致。执行的是反汇编，不是VCS编译或RTL仿真。
+GNU反汇编输出保存在宿主机build/rv32i_vectors/gnu-disassembly.txt，属于忽略的构建产物。
+可复核：python scripts/generate_rv32i_vectors.py --check-objdump build/rv32i_vectors/gnu-disassembly.txt
+2026-10-22 用户已手动完成新增TB的VCS编译和仿真，并反馈“全部通过”。
+验证结果记录为用户确认通过；助手未代为执行VCS，原始仿真日志保留在虚拟机运行目录。
+没有自动git add、commit或push，也没有安装新工具。

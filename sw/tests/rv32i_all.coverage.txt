@@ -1,0 +1,54 @@
+HOST REFERENCE RESULTS ONLY; VCS/RTL simulation has NOT been run.
+ISA kinds executed: 37/37
+Image words: 152
+Executed instructions: 145
+Hand-written checkpoints passed: 85
+Expected end time: 1466 ns
+Image SHA256: 56f98c952a68b748e92383871cd203458c9bb4484a8d70accb4c2f91e626dcbf
+
+Instruction hits:
+ADD 4
+ADDI 39
+AND 1
+ANDI 1
+AUIPC 4
+BEQ 3
+BGE 3
+BGEU 3
+BLT 3
+BLTU 3
+BNE 5
+JAL 6
+JALR 3
+LB 4
+LBU 4
+LH 4
+LHU 3
+LUI 8
+LW 4
+OR 1
+ORI 1
+SB 4
+SH 2
+SLL 3
+SLLI 2
+SLT 3
+SLTI 2
+SLTIU 2
+SLTU 3
+SRA 3
+SRAI 2
+SRL 2
+SRLI 1
+SUB 2
+SW 5
+XOR 1
+XORI 1
+
+Branch outcomes:
+BEQ taken=1 not_taken=2
+BNE taken=3 not_taken=2
+BLT taken=1 not_taken=2
+BGE taken=2 not_taken=1
+BLTU taken=1 not_taken=2
+BGEU taken=2 not_taken=1
