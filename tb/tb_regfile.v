@@ -2,15 +2,15 @@
 
 module tb_regfile;
 
-    wire clk;
-    wire rst_n;
-    wire we;
-    wire [4:0] waddr;
-    wire [31:0] wdata;
-    wire [4:0] raddr1;
-    reg [31:0] rdata1;
-    wire [4:0] raddr2;
-    reg [31:0] rdata2;
+    reg clk;
+    reg rst_n;
+    reg we;
+    reg [4:0] waddr;
+    reg [31:0] wdata;
+    reg [4:0] raddr1;
+    wire [31:0] rdata1;
+    reg [4:0] raddr2;
+    wire [31:0] rdata2;
 
     regfile dut_regfile(
         .clk(clk),
