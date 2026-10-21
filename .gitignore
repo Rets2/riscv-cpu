@@ -1,0 +1,22 @@
+# Build outputs
+/build/
+/csrc/
+/simv
+/simv.daidir/
+/simv.vdb/
+/ucli.key
+/DVEfiles/
+/verdiLog/
+/novas.conf
+/novas.rc
+
+# Logs and waveforms
+*.log
+*.vcd
+*.vpd
+*.fsdb
+
+# Editor temporary files
+*.swp
+*.swo
+*~
