@@ -63,6 +63,11 @@ module cpu_top(
     reg fault_flag;
     reg [3:0] fault_code;
 
+    wire pc_en;
+    wire regfile_en;
+    wire dmem_write_en;
+    wire dmem_read_en;
+
     //模块实例化
     //取指
     pc u_pc(
@@ -117,7 +122,7 @@ module cpu_top(
     );
 
     alu_B_mux u_alu_B_mux(
-        .rs2_data(rs2_data),
+        .rdata2(rs2_data),
         .imm(imm),
         .alu_src_b(alu_src_b),
         .alu_B_operator(alu_B_operator)
@@ -254,10 +259,6 @@ module cpu_top(
     wire execute_enable;
     assign execute_enable = !fault_flag && !halted;
 
-    wire pc_en;
-    wire regfile_en;
-    wire dmem_write_en;
-    wire dmem_read_en;
 
     assign pc_en = execute_enable;
     assign regfile_en = execute_enable && reg_write;
